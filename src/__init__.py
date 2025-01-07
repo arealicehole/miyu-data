@@ -14,10 +14,10 @@ load_dotenv()
 
 # Bot configuration
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 
-if not DISCORD_TOKEN or not ANTHROPIC_API_KEY:
-    logger.error("DISCORD_TOKEN or ANTHROPIC_API_KEY not found in environment variables.")
+if not DISCORD_TOKEN or not DEEPSEEK_API_KEY:
+    logger.error("DISCORD_TOKEN or DEEPSEEK_API_KEY not found in environment variables.")
     raise ValueError("Missing required environment variables.")
 
 # Discord setup
