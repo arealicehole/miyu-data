@@ -1,14 +1,38 @@
 import os
+import asyncio
 from datetime import datetime
 from pinecone import Pinecone, ServerlessSpec
 from typing import List, Dict
 from .ai_service import AIService
+from functools import wraps
+import logging
+
+logger = logging.getLogger(__name__)
+
+def retry(max_retries=3, delay=1):
+    """Decorator to retry a function with exponential backoff"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            retries = 0
+            while retries < max_retries:
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    retries += 1
+                    if retries >= max_retries:
+                        raise
+                    wait = delay * (2 ** (retries - 1))
+                    logger.warning(f"Retry {retries}/{max_retries} after {wait}s: {str(e)}")
+                    await asyncio.sleep(wait)
+        return wrapper
+    return decorator
 
 class DBService:
     # Constants
     VECTOR_DIMENSION = 3072  # Standard dimension for text embeddings
     CHUNK_SIZE = 30000  # Size for transcript chunks
-    BATCH_SIZE = 100  # Size for Pinecone batch operations
+    BATCH_SIZE = 50  # Reduced batch size for better reliability
     DEFAULT_TOP_K = 1000  # Default number of results to fetch
     
     def __init__(self):
@@ -16,7 +40,13 @@ class DBService:
         if not self.api_key:
             raise ValueError("PINECONE_API_KEY not found in environment variables.")
         
-        self.pc = Pinecone(api_key=self.api_key)
+        # Configure Pinecone with timeout settings
+        self.pc = Pinecone(
+            api_key=self.api_key,
+            additional_headers={
+                'timeout': '30'  # 30 second timeout for API calls
+            }
+        )
         self.index_name = 'miyu-testa'
         
         # Create index if it doesn't exist
@@ -71,6 +101,11 @@ class DBService:
         
         return sections
 
+    @retry(max_retries=3, delay=1)
+    async def _async_upsert(self, batch):
+        """Async wrapper for Pinecone upsert operation"""
+        return await asyncio.to_thread(self.index.upsert, vectors=batch)
+
     async def save_transcript(self, channel_id: int, transcript: str, source: str = "channel", transcript_name: str = None):
         timestamp = datetime.now().isoformat()
         
@@ -108,10 +143,14 @@ class DBService:
             }
             vectors.append((vector_id, self.placeholder_vector, metadata))
         
-        # Upsert to Pinecone in batches
-        for i in range(0, len(vectors), self.BATCH_SIZE):
-            batch = vectors[i:i+self.BATCH_SIZE]
-            self.index.upsert(vectors=batch)
+        # Upsert to Pinecone in batches with error handling
+        try:
+            for i in range(0, len(vectors), self.BATCH_SIZE):
+                batch = vectors[i:i+self.BATCH_SIZE]
+                await self._async_upsert(batch)
+        except Exception as e:
+            logger.error(f"Failed to upsert transcript: {str(e)}")
+            raise RuntimeError(f"Failed to save transcript: {str(e)}")
         
         return f"{channel_id}_{timestamp}"
 
