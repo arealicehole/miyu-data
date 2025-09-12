@@ -5,8 +5,17 @@ from .message_handler import split_and_send_message
 from .db_service import DBService
 from discord.utils import find
 
-ai_service = AIService()
-db_service = DBService()
+# Defer initialization to avoid connection issues during imports
+ai_service = None
+db_service = None
+
+def _ensure_services():
+    """Initialize services if not already done"""
+    global ai_service, db_service
+    if ai_service is None:
+        ai_service = AIService()
+    if db_service is None:
+        db_service = DBService()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +56,7 @@ async def on_message(message):
 
     if bot_mentioned:
         logger.info("Bot mentioned, processing message...")
+        _ensure_services()  # Initialize services if needed
         channel_id = message.channel.id
         logger.info(f"Channel ID: {channel_id}")
 

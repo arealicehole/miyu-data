@@ -14,11 +14,24 @@ load_dotenv()
 
 # Bot configuration
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'openrouter')
 
-if not DISCORD_TOKEN or not DEEPSEEK_API_KEY:
-    logger.error("DISCORD_TOKEN or DEEPSEEK_API_KEY not found in environment variables.")
-    raise ValueError("Missing required environment variables.")
+# Check for required tokens based on provider
+if not DISCORD_TOKEN:
+    logger.error("DISCORD_TOKEN not found in environment variables.")
+    raise ValueError("Missing DISCORD_TOKEN in environment variables.")
+
+# Check AI provider requirements
+if AI_PROVIDER == 'openrouter':
+    if not os.getenv('OPENROUTER_API_KEY'):
+        logger.error("OPENROUTER_API_KEY not found in environment variables.")
+        raise ValueError("Missing OPENROUTER_API_KEY for OpenRouter provider.")
+elif AI_PROVIDER == 'deepseek':
+    if not os.getenv('DEEPSEEK_API_KEY'):
+        logger.error("DEEPSEEK_API_KEY not found in environment variables.")
+        raise ValueError("Missing DEEPSEEK_API_KEY for DeepSeek provider.")
+else:
+    logger.warning(f"Unknown AI provider: {AI_PROVIDER}. Defaulting to OpenRouter.")
 
 # Discord setup
 intents = discord.Intents.default()

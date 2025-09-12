@@ -8,7 +8,7 @@ load_dotenv()
 
 # Bot configuration
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'openrouter')
 
 # Discord setup
 intents = discord.Intents.default()

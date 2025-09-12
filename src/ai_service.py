@@ -1,8 +1,12 @@
 import os
-import aiohttp
 import asyncio
 from functools import wraps
-from .config import DEEPSEEK_API_KEY
+from typing import Optional
+from src.providers import get_ai_provider, AIProvider
+from src.models.ai_models import AIRequest, AIResponse
+import logging
+
+logger = logging.getLogger(__name__)
 
 def retry(max_retries=3, delay=1):
     def decorator(f):
@@ -21,61 +25,59 @@ def retry(max_retries=3, delay=1):
     return decorator
 
 class AIService:
-    def __init__(self):
-        self.api_key = DEEPSEEK_API_KEY
-        self.base_url = "https://api.deepseek.com/v1/chat/completions"
-        self.model = "deepseek-chat"
+    # Prompt constants
+    CLOSER_LOOK_PROMPT = (
+        "You are a highly detailed and thorough assistant analyzing meeting transcripts. "
+        "Provide comprehensive, in-depth responses that cover all relevant aspects of the given topic. "
+        "Include specific details, examples, and context from the transcript when applicable. "
+        "Your goal is to give a complete and nuanced answer that leaves no stone unturned."
+    )
+    
+    REPORT_PROMPT = (
+        "You are a helpful assistant tasked with analyzing meeting transcripts and creating comprehensive reports."
+    )
+    
+    GENERAL_PROMPT = (
+        "You are a highly detailed and thorough assistant analyzing meeting transcripts. "
+        "Provide comprehensive, in-depth responses that cover all relevant aspects of the given task. "
+        "Include specific details, examples, and context from the transcript when applicable. "
+        "Your goal is to give a complete and nuanced answer that leaves no stone unturned. "
+        "When asked to return a list, format it as a comma-separated list."
+    )
+    
+    def __init__(self, provider: Optional[AIProvider] = None):
+        self.provider = provider or get_ai_provider()
         self.max_tokens = 4096
-        self.timeout = aiohttp.ClientTimeout(total=30)
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
-    @retry(max_retries=3)
-    async def get_closer_look(self, transcript: str, topic: str) -> str:
-        system_prompt = "You are a highly detailed and thorough assistant analyzing meeting transcripts. Provide comprehensive, in-depth responses that cover all relevant aspects of the given topic. Include specific details, examples, and context from the transcript when applicable. Your goal is to give a complete and nuanced answer that leaves no stone unturned."
-        
-        # Truncate transcript if needed to fit within token limit
-        max_transcript_length = self.max_tokens * 4  # Approximate character count
-        if len(transcript) > max_transcript_length:
-            transcript = transcript[:max_transcript_length]
-            
-        user_content = f"Please go into more depth about '{topic}' and the conversation surrounding and related to '{topic}' from the transcript. Include relevant examples, context, and specific information from the transcript in your response.\n\nTranscript:\n{transcript}"
-        
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "max_tokens": self.max_tokens,
-            "stream": False
-        }
-        
-        try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(
-                    self.base_url,
-                    headers=self.headers,
-                    json=payload
-                ) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    return data['choices'][0]['message']['content']
-        except Exception as e:
-            return f"Error getting closer look: {str(e)}"
-
-    @retry(max_retries=3)
-    async def generate_comprehensive_report(self, transcript: str) -> str:
-        system_prompt = "You are a helpful assistant tasked with analyzing meeting transcripts and creating comprehensive reports."
-        
-        # Truncate transcript if needed to fit within token limit
-        max_transcript_length = self.max_tokens * 4  # Approximate character count
-        if len(transcript) > max_transcript_length:
-            transcript = transcript[:max_transcript_length]
-            
-        user_content = f"""Please analyze the following transcript and organize the information into these specific categories:
+        # Get model override, strip whitespace and comments
+        model_env = os.getenv('AI_MODEL', '').strip()
+        # Remove inline comments if present
+        if '#' in model_env:
+            model_env = model_env.split('#')[0].strip()
+        self.model = model_env if model_env else None
+        # YOLO mode - no limits!
+        self.yolo_mode = os.getenv('YOLO_MODE', 'false').lower() == 'true'
+        if self.yolo_mode:
+            logger.info("🚀 YOLO_MODE enabled - AI processing limits removed!")
+    
+    def _truncate_transcript(self, transcript: str) -> str:
+        """Truncate transcript to fit within token limits"""
+        if self.yolo_mode:
+            return transcript  # No truncation in YOLO mode
+        max_length = self.max_tokens * 4  # Approximate character count
+        return transcript[:max_length] if len(transcript) > max_length else transcript
+    
+    def _format_closer_look_query(self, transcript: str, topic: str) -> str:
+        """Format the query for closer look analysis"""
+        return (
+            f"Please go into more depth about '{topic}' and the conversation surrounding "
+            f"and related to '{topic}' from the transcript. Include relevant examples, "
+            f"context, and specific information from the transcript in your response.\n\n"
+            f"Transcript:\n{transcript}"
+        )
+    
+    def _format_report_query(self, transcript: str) -> str:
+        """Format the query for comprehensive report generation"""
+        return f"""Please analyze the following transcript and organize the information into these specific categories:
 
 1. Main Conversation Topics: List and briefly summarize the main topics discussed in the meeting.
 2. Content Ideas: Identify any content ideas or suggestions that were proposed during the meeting.
@@ -88,60 +90,57 @@ For each category, provide detailed information and context from the transcript.
 
 Transcript:
 {transcript}"""
-        
-        payload = {
-            "model": self.model,
-            "messages": [
+    
+    def _format_general_query(self, transcript: str, query: str) -> str:
+        """Format a general query for AI response"""
+        return (
+            f"Please provide a detailed and comprehensive response to the following task "
+            f"about the meeting transcript. Include relevant examples, context, and specific "
+            f"information from the transcript in your response.\n\n"
+            f"Transcript:\n{transcript}\n\nTask: {query}"
+        )
+    
+    def _build_request(self, system_prompt: str, user_content: str) -> AIRequest:
+        """Build an AI request with the given prompts"""
+        return AIRequest(
+            model=self.model or "",  # Will use provider's default if empty
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
-            "max_tokens": self.max_tokens,
-            "stream": False
-        }
-        
+            max_tokens=self.max_tokens,
+            stream=False
+        )
+    
+    async def _execute_request(self, request: AIRequest) -> str:
+        """Execute an AI request and return the content"""
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(
-                    self.base_url,
-                    headers=self.headers,
-                    json=payload
-                ) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    return data['choices'][0]['message']['content']
+            response = await self.provider.chat_completion(request)
+            return response.content
         except Exception as e:
-            return f"Error generating comprehensive report: {str(e)}"
-
+            logger.error(f"AI request failed: {str(e)}")
+            return f"Error processing AI request: {str(e)}"
+    
+    @retry(max_retries=3)
+    async def get_closer_look(self, transcript: str, topic: str) -> str:
+        """Get a detailed analysis of a specific topic from the transcript"""
+        transcript = self._truncate_transcript(transcript)
+        user_content = self._format_closer_look_query(transcript, topic)
+        request = self._build_request(self.CLOSER_LOOK_PROMPT, user_content)
+        return await self._execute_request(request)
+    
+    @retry(max_retries=3)
+    async def generate_comprehensive_report(self, transcript: str) -> str:
+        """Generate a comprehensive report from the transcript"""
+        transcript = self._truncate_transcript(transcript)
+        user_content = self._format_report_query(transcript)
+        request = self._build_request(self.REPORT_PROMPT, user_content)
+        return await self._execute_request(request)
+    
     @retry(max_retries=3)
     async def get_response(self, transcript: str, query: str) -> str:
-        system_prompt = "You are a highly detailed and thorough assistant analyzing meeting transcripts. Provide comprehensive, in-depth responses that cover all relevant aspects of the given task. Include specific details, examples, and context from the transcript when applicable. Your goal is to give a complete and nuanced answer that leaves no stone unturned. When asked to return a list, format it as a comma-separated list."
-        
-        # Truncate transcript if needed to fit within token limit
-        max_transcript_length = self.max_tokens * 4  # Approximate character count
-        if len(transcript) > max_transcript_length:
-            transcript = transcript[:max_transcript_length]
-            
-        user_content = f"Please provide a detailed and comprehensive response to the following task about the meeting transcript. Include relevant examples, context, and specific information from the transcript in your response.\n\nTranscript:\n{transcript}\n\nTask: {query}"
-        
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "max_tokens": self.max_tokens,
-            "stream": False
-        }
-        
-        try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(
-                    self.base_url,
-                    headers=self.headers,
-                    json=payload
-                ) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    return data['choices'][0]['message']['content']
-        except Exception as e:
-            return f"Error getting AI response: {str(e)}"
+        """Get a general AI response for a query about the transcript"""
+        transcript = self._truncate_transcript(transcript)
+        user_content = self._format_general_query(transcript, query)
+        request = self._build_request(self.GENERAL_PROMPT, user_content)
+        return await self._execute_request(request)

@@ -2,15 +2,24 @@ import discord
 from discord import app_commands
 import asyncio
 import functools
-from typing import Dict, Optional, Callable, Any
+from typing import Dict, Optional, Callable, Any, Tuple
 from datetime import datetime
 from .config import bot, INGESTION_BATCH_SIZE
 from .ai_service import AIService
 from .message_handler import split_and_send_message
 from .db_service import DBService
 
-ai_service = AIService()
-db_service = DBService()
+# Defer initialization to avoid connection issues during imports
+ai_service = None
+db_service = None
+
+def _ensure_services() -> None:
+    """Initialize services if not already done"""
+    global ai_service, db_service
+    if ai_service is None:
+        ai_service = AIService()
+    if db_service is None:
+        db_service = DBService()
 
 def handle_interaction_errors(func: Callable) -> Callable:
     """Decorator to handle common interaction error patterns"""
@@ -32,6 +41,7 @@ def handle_interaction_errors(func: Callable) -> Callable:
 
 async def check_transcript_exists(interaction: discord.Interaction) -> bool:
     """Check if a transcript exists for the channel"""
+    _ensure_services()
     transcript = await db_service.get_channel_transcript(interaction.channel.id)
     if not transcript:
         await interaction.followup.send("No transcript has been ingested for this channel. Use /ingest or /ingest_file first!")
@@ -61,6 +71,7 @@ async def process_channel_messages(interaction: discord.Interaction, max_message
 @bot.tree.command(name="execute_notes", description="Execute all AI tasks noted from the transcript")
 @handle_interaction_errors
 async def execute_notes(interaction: discord.Interaction):
+    _ensure_services()
     channel_id = interaction.channel.id
     
     if not await check_transcript_exists(interaction):
@@ -88,6 +99,7 @@ async def execute_notes(interaction: discord.Interaction):
 @app_commands.describe(topic="The topic you want to explore in more depth")
 @handle_interaction_errors
 async def closerlook(interaction: discord.Interaction, topic: str):
+    _ensure_services()
     if not await check_transcript_exists(interaction):
         return
     
@@ -102,6 +114,7 @@ async def closerlook(interaction: discord.Interaction, topic: str):
 )
 @handle_interaction_errors
 async def ingest(interaction: discord.Interaction, transcript_name: str, max_messages: int = 0):
+    _ensure_services()
     try:
         transcript, message_count = await process_channel_messages(interaction, max_messages)
         
@@ -120,6 +133,7 @@ async def ingest(interaction: discord.Interaction, transcript_name: str, max_mes
 )
 @handle_interaction_errors
 async def ingest_file(interaction: discord.Interaction, file: discord.Attachment, transcript_name: str):
+    _ensure_services()
     if not file.filename.endswith('.txt'):
         await interaction.followup.send("Please upload a .txt file.")
         return
@@ -136,6 +150,7 @@ async def ingest_file(interaction: discord.Interaction, file: discord.Attachment
 @bot.tree.command(name="autoreport", description="Generate a detailed report for each item from the transcript analysis")
 @handle_interaction_errors
 async def autoreport(interaction: discord.Interaction):
+    _ensure_services()
     if not await check_transcript_exists(interaction):
         return
     
