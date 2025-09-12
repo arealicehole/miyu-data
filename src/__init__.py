@@ -45,7 +45,7 @@ INGESTION_BATCH_SIZE = 1000
 
 # Import event handlers and commands
 from .events import on_message, set_bot_ready
-from .commands import closerlook, ingest, ingest_file, autoreport, execute_notes
+from .commands import closerlook, ingest, ingest_file, autoreport, execute_notes, search, explore, help_command
 
 # Explicitly add commands to the bot's command tree
 bot.tree.add_command(closerlook)
@@ -53,6 +53,9 @@ bot.tree.add_command(ingest)
 bot.tree.add_command(ingest_file)
 bot.tree.add_command(autoreport)
 bot.tree.add_command(execute_notes)
+bot.tree.add_command(search)
+bot.tree.add_command(explore)
+bot.tree.add_command(help_command)
 
 # Register event handlers
 @bot.event

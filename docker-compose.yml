@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  miyu-bot:
+    build: .
+    image: miyu-data-bot:2.0.0
+    container_name: miyu-data-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data  # For persistent storage if needed
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - miyu-network
+
+networks:
+  miyu-network:
+    driver: bridge

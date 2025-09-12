@@ -5,6 +5,7 @@ from pinecone import Pinecone, ServerlessSpec
 from typing import List, Dict, Optional, Tuple
 from src.models.transcript import TranscriptMetadata, TranscriptSections
 from src.ai_service import AIService
+from src.providers.embeddings import get_embedding_provider
 from functools import wraps
 import logging
 
@@ -32,7 +33,8 @@ def retry(max_retries=3, delay=1):
 class DBService:
     # Constants
     VECTOR_DIMENSION = 3072  # Standard dimension for text embeddings
-    CHUNK_SIZE = 30000  # Size for transcript chunks
+    CHUNK_SIZE = 1500  # Optimal size for RAG (roughly 300-400 tokens)
+    CHUNK_OVERLAP = 200  # 13% overlap for context preservation
     BATCH_SIZE = 50  # Reduced batch size for better reliability
     DEFAULT_TOP_K = 1000  # Default number of results to fetch
     
@@ -61,6 +63,15 @@ class DBService:
             raise
         # Pre-compute placeholder vector
         self.placeholder_vector = [0.1] * self.VECTOR_DIMENSION
+        
+        # Initialize embedding provider
+        try:
+            self.embedding_provider = get_embedding_provider()
+            logger.info("Initialized embedding provider")
+        except Exception as e:
+            logger.warning(f"Failed to initialize embedding provider: {e}")
+            logger.warning("Falling back to placeholder vectors")
+            self.embedding_provider = None
     
     def _create_index(self) -> None:
         """Create Pinecone index with configured settings"""
@@ -116,11 +127,37 @@ class DBService:
         return sections
     
     def _chunk_transcript(self, transcript: str) -> List[str]:
-        """Split transcript into chunks of appropriate size"""
-        return [
-            transcript[i:i + self.CHUNK_SIZE] 
-            for i in range(0, len(transcript), self.CHUNK_SIZE)
-        ]
+        """Split transcript into semantically meaningful chunks with overlap"""
+        if not transcript:
+            return []
+        
+        chunks = []
+        start = 0
+        
+        while start < len(transcript):
+            # Calculate end position
+            end = min(start + self.CHUNK_SIZE, len(transcript))
+            
+            # If not at the beginning and not the last chunk, try to break at a sentence
+            if start > 0 and end < len(transcript):
+                # Look for sentence boundaries near the end
+                for delimiter in ['. ', '! ', '? ', '\n\n', '\n']:
+                    last_delimiter = transcript.rfind(delimiter, start + self.CHUNK_SIZE - 100, end)
+                    if last_delimiter != -1:
+                        end = last_delimiter + len(delimiter)
+                        break
+            
+            # Add the chunk
+            chunk = transcript[start:end].strip()
+            if chunk:  # Only add non-empty chunks
+                chunks.append(chunk)
+            
+            # Move start position with overlap
+            if end >= len(transcript):
+                break
+            start = end - self.CHUNK_OVERLAP
+        
+        return chunks
     
     async def _prepare_metadata(
         self, 
@@ -153,17 +190,30 @@ class DBService:
         
         return base_metadata, sections
     
-    def _create_vectors(
+    async def _create_vectors(
         self, 
         chunks: List[str], 
         base_metadata: TranscriptMetadata,
         sections: TranscriptSections
     ) -> List[Tuple[str, List[float], Dict]]:
-        """Create vector representations for transcript chunks"""
+        """Create vector representations for transcript chunks using real embeddings"""
         vectors = []
         total_chunks = len(chunks)
         
-        for i, chunk in enumerate(chunks):
+        # Generate embeddings for all chunks
+        if self.embedding_provider:
+            try:
+                logger.info(f"Generating embeddings for {total_chunks} chunks...")
+                embeddings = await self.embedding_provider.create_embeddings(chunks)
+                logger.info(f"Successfully generated {len(embeddings)} embeddings")
+            except Exception as e:
+                logger.error(f"Failed to generate embeddings: {e}")
+                logger.warning("Falling back to placeholder vectors")
+                embeddings = [self.placeholder_vector] * total_chunks
+        else:
+            embeddings = [self.placeholder_vector] * total_chunks
+        
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             vector_id = f"{base_metadata.channel_id}_{base_metadata.timestamp.isoformat()}_{i}"
             
             # Create metadata dict for this chunk
@@ -184,7 +234,7 @@ class DBService:
                 'critical_updates': sections.critical_updates
             }
             
-            vectors.append((vector_id, self.placeholder_vector, metadata))
+            vectors.append((vector_id, embedding, metadata))
         
         return vectors
     
@@ -219,8 +269,8 @@ class DBService:
         # Chunk the transcript
         chunks = self._chunk_transcript(transcript)
         
-        # Create vectors
-        vectors = self._create_vectors(chunks, base_metadata, sections)
+        # Create vectors with real embeddings
+        vectors = await self._create_vectors(chunks, base_metadata, sections)
         
         # Upsert to Pinecone
         await self._upsert_vectors(vectors)
@@ -237,6 +287,17 @@ class DBService:
         if transcript_name:
             filter_dict['transcript_name'] = transcript_name
         return filter_dict
+    
+    async def _get_query_vector(self, query: Optional[str] = None) -> List[float]:
+        """Generate query vector for semantic search"""
+        if query and self.embedding_provider:
+            try:
+                return await self.embedding_provider.create_embedding(query)
+            except Exception as e:
+                logger.warning(f"Failed to generate query embedding: {e}")
+                logger.warning("Using placeholder vector for query")
+        
+        return self.placeholder_vector
     
     async def get_channel_transcript(
         self, 
@@ -262,6 +323,37 @@ class DBService:
             key=lambda x: x.metadata['chunk_index']
         )
         return ''.join(chunk.metadata['text'] for chunk in sorted_chunks)
+    
+    async def search_transcripts(
+        self, 
+        query: str, 
+        channel_id: int, 
+        top_k: int = 5,
+        min_score: float = 0.7
+    ) -> List[Dict]:
+        """Semantic search for relevant transcript chunks"""
+        filter_dict = self._build_channel_filter(channel_id)
+        query_vector = await self._get_query_vector(query)
+        
+        query_response = self.index.query(
+            vector=query_vector,
+            filter=filter_dict,
+            top_k=top_k,
+            include_metadata=True
+        )
+        
+        results = []
+        for match in query_response.matches:
+            if match.score >= min_score:
+                results.append({
+                    'text': match.metadata['text'],
+                    'score': match.score,
+                    'chunk_index': match.metadata['chunk_index'],
+                    'timestamp': match.metadata['timestamp'],
+                    'transcript_name': match.metadata.get('transcript_name', 'Unknown')
+                })
+        
+        return results
     
     async def delete_transcript(self, channel_id: int) -> None:
         """Delete all vectors associated with a channel"""

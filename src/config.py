@@ -10,6 +10,14 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 AI_PROVIDER = os.getenv('AI_PROVIDER', 'openrouter')
 
+# Embedding configuration  
+EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'openai')
+EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
+
+# RAG configuration
+RAG_CHUNK_SIZE = int(os.getenv('RAG_CHUNK_SIZE', '1500'))
+RAG_CHUNK_OVERLAP = int(os.getenv('RAG_CHUNK_OVERLAP', '200'))
+
 # Discord setup
 intents = discord.Intents.default()
 intents.message_content = True

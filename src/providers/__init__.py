@@ -1,6 +1,7 @@
 from .base import AIProvider
 from .openrouter import OpenRouterProvider
 from .deepseek import DeepSeekProvider
+from .embeddings import EmbeddingProvider, OpenAIEmbeddingProvider, get_embedding_provider
 import os
 from typing import Optional
 
@@ -32,5 +33,8 @@ __all__ = [
     'AIProvider',
     'OpenRouterProvider',
     'DeepSeekProvider',
-    'get_ai_provider'
+    'get_ai_provider',
+    'EmbeddingProvider',
+    'OpenAIEmbeddingProvider',
+    'get_embedding_provider'
 ]
