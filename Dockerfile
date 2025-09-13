@@ -1,5 +1,5 @@
 # Miyu-Data Discord Bot with RAG
-# Version: MDB2A (v2.0.0) - Optimized build
+# Version: MDB2B (v2.0.1) - Enhanced help system
 
 FROM python:3.11-slim
 

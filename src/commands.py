@@ -282,38 +282,74 @@ async def help_command(interaction: discord.Interaction):
     """Show help for all commands including new RAG features"""
     
     help_text = """
-**📚 Miyu-Data Discord Bot - Command Reference**
+**🤖 Miyu-Data v2.0 - Your RAG-Powered Discord Assistant**
 
-**📥 Data Ingestion:**
-• `/ingest <transcript_name> [max_messages]` - Ingest channel messages
-• `/ingest_file <file> <transcript_name>` - Ingest from .txt file
+**📥 Data Ingestion Commands:**
+• `/ingest <name> [max_msgs]` - Capture channel history into searchable database
+  → Example: `/ingest meeting-notes 500`
+• `/ingest_file <file> <name>` - Import .txt file content
+  → Attach file and name it for future searches
 
-**🔍 Smart Search (RAG-Powered):**
-• `/search <query> [max_results]` - Semantic search with AI optimization
-• `/closerlook <topic>` - Deep analysis using semantic search + AI
-• `/explore [topic] [depth]` - Interactive exploration with suggestions
+**🔍 Search Commands Explained:**
+• `/search <query>` - **Find specific information**
+  → Returns raw search results from transcripts
+  → Best for: Finding exact quotes, decisions, or facts
+  → Example: `/search "API endpoint discussion"`
+  
+• `/closerlook <topic>` - **Get AI analysis on a topic**
+  → Searches THEN generates detailed AI insights
+  → Best for: Understanding complex topics, getting summaries
+  → Example: `/closerlook "authentication strategy"`
+  
+• `/explore [topic]` - **Browse and discover content**
+  → Interactive exploration with AI suggestions
+  → Best for: Not sure what you're looking for
+  → Example: `/explore` (see everything) or `/explore "bugs"`
 
-**📊 Analysis & Reports:**
-• `/autoreport` - Generate detailed reports for all transcript sections  
-• `/execute_notes` - Execute all AI tasks from transcript analysis
+**📊 Analysis & Automation:**
+• `/autoreport` - Generate comprehensive reports from ingested data
+• `/execute_notes` - Execute AI-generated action items
 
-**🧠 RAG Features:**
-✨ **Semantic Search** - Finds content by meaning, not just keywords
-✨ **Query Optimization** - Automatically expands and improves your queries
-✨ **Multi-Query Processing** - Searches multiple query variations for better results
-✨ **Smart Scoring** - Ranks results by relevance with confidence indicators
+**💬 Conversational AI (NEW!):**
+• **@Miyu-Data** - Chat naturally! I remember context and search when needed
+  → Just @ mention me in any message
+  → I maintain conversation history (10 messages, 30 min timeout)
+  → I'll automatically search transcripts when relevant
 
-**💡 Search Tips:**
-• Use natural language: "What decisions were made about the database?"
-• Try different phrasings: "action items", "tasks", "things to do"
-• Combine concepts: "mobile app authentication security"
-• Use `/explore` without a topic to see what's available to search
+**⚡ Quick Start:**
+1. Ingest your data: `/ingest project-chat 1000`
+2. Search it: `/search "important decisions"`
+3. Or just ask me: `@Miyu-Data what did we decide about the API?`
 
-**🎯 Score Guide:**
-🟢 0.6+ = Highly relevant | 🟡 0.4+ = Good match | 🟠 0.3+ = Related content
+**🎯 Best Practices:**
+• **For specific facts:** Use `/search` with clear queries
+• **For analysis:** Use `/closerlook` with a topic
+• **For discovery:** Use `/explore` to browse content
+• **For conversation:** Just @ mention me naturally
+
+**🔧 Under the Hood:**
+• OpenAI embeddings for semantic understanding
+• Vector search with Pinecone (1500 char chunks)
+• Multi-query optimization for better results
+• Channel-specific transcript searching
+
+**💡 Pro Tips:**
+• Semantic search understands context, not just keywords
+• Higher depth in `/explore` = more AI insights
+• Score Guide: 🟢 0.6+ High | 🟡 0.4+ Good | 🟠 0.3+ Related
+
+**📚 Bot Documentation:**
+I have my own documentation ingested! Ask me about:
+• How to use specific commands
+• Technical implementation details
+• Configuration and setup instructions
+• What features are available
+
+GitHub: https://github.com/arealicehole/miyu-data
     """
     
     await split_and_send_message(interaction.channel, help_text)
+
 
 @bot.tree.command(name="ingest", description="Ingest meeting transcript from channel history")
 @app_commands.describe(
