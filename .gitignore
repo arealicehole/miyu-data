@@ -3,3 +3,6 @@
 PRPs/
 RAG_EVALUATION.md
 rag.md
+deploy.yaml
+__pycache__/
+src/__pycache__/
