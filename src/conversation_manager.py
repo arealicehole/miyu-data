@@ -190,33 +190,39 @@ class ConversationalRAGHandler:
         self.query_processor = query_processor
         self.conversation_manager = ConversationManager()
         
-    async def handle_mention(self, message, channel_id: int) -> str:
+    async def handle_mention(self, message, channel_id: int, transcript_exists: bool = True) -> str:
         """
         Handle an @ mention with conversational context and optional RAG
-        
+
         Args:
             message: Discord message object
             channel_id: Channel ID
-            
+            transcript_exists: Whether a transcript exists for this channel
+
         Returns:
             Response text to send
         """
         user_input = message.content
         author_name = message.author.name
-        
+
         # Add user message to conversation history
         self.conversation_manager.add_message(
-            channel_id, 
+            channel_id,
             f"User ({author_name})",
             user_input,
             message.id
         )
-        
-        # Determine if we need to search transcripts
-        should_search, search_query = self.conversation_manager.should_search_transcripts(
-            user_input, 
-            channel_id
-        )
+
+        # Always search if transcript exists - that's the whole point of the bot
+        if transcript_exists:
+            should_search = True
+            search_query = user_input
+        else:
+            # Only use keyword detection when no transcript exists
+            should_search, search_query = self.conversation_manager.should_search_transcripts(
+                user_input,
+                channel_id
+            )
         
         # Get conversation history
         conv_history = self.conversation_manager.format_conversation_context(channel_id)

@@ -76,20 +76,19 @@ async def on_message(message):
             # Pure conversational mode without transcript context
             logger.info("No transcript found - using pure conversational mode")
             try:
-                # Still use the conversational handler but it won't have transcript search available
-                response = await conversational_handler.handle_mention(message, channel_id)
+                response = await conversational_handler.handle_mention(message, channel_id, transcript_exists=False)
                 await split_and_send_message(message.channel, response)
             except Exception as e:
                 logger.error(f"Error in conversational response: {str(e)}")
                 await message.reply("I'm here to help! However, no transcript has been ingested yet. Use /ingest or /ingest_file to add meeting transcripts that I can reference.")
             return
-        
+
         logger.info(f"Transcript available for RAG search")
-        
+
         try:
             logger.info("Processing with conversational RAG handler...")
-            # Use the new conversational handler with RAG capabilities
-            response = await conversational_handler.handle_mention(message, channel_id)
+            # Always search transcript when one exists
+            response = await conversational_handler.handle_mention(message, channel_id, transcript_exists=True)
             logger.info(f"Generated response with context")
             await split_and_send_message(message.channel, response)
         except Exception as e:
