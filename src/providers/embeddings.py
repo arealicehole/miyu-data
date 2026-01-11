@@ -44,51 +44,43 @@ class EmbeddingProvider(ABC):
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     """OpenAI embeddings provider using direct API"""
-    
-    def __init__(self, api_key: Optional[str] = None, model: str = "text-embedding-3-small"):
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "text-embedding-3-large"):
         self.api_key = api_key or os.getenv('OPENAI_API_KEY')
         if not self.api_key:
             raise ValueError("OpenAI API key is required for embeddings")
-        
+
         self.client = AsyncOpenAI(api_key=self.api_key)
         self.model = model
-        self.raw_dimensions = 1536 if model == "text-embedding-3-small" else 3072
-        # Pad to 3072 to match existing Pinecone index
-        self.target_dimensions = 3072
-        logger.info(f"Initialized OpenAI embedding provider with model: {model} (raw: {self.raw_dimensions}, padded: {self.target_dimensions} dimensions)")
-    
-    def _pad_embedding(self, embedding: List[float]) -> List[float]:
-        """Pad embedding to target dimensions with zeros"""
-        if len(embedding) >= self.target_dimensions:
-            return embedding[:self.target_dimensions]
-        return embedding + [0.0] * (self.target_dimensions - len(embedding))
+        self.dimensions = 3072  # text-embedding-3-large native dimensions
+        logger.info(f"Initialized OpenAI embedding provider with model: {model} ({self.dimensions} dimensions)")
     
     @retry_with_backoff(max_retries=3)
     async def create_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Batch create embeddings with automatic batching for large inputs"""
         if not texts:
             return []
-        
+
         # OpenAI allows up to 2048 inputs per request
         batch_size = 100  # Conservative batch size to avoid rate limits
         all_embeddings = []
-        
+
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             logger.debug(f"Creating embeddings for batch {i//batch_size + 1} ({len(batch)} texts)")
-            
+
             response = await self.client.embeddings.create(
                 model=self.model,
                 input=batch
             )
-            
-            # Sort by index to maintain order and pad embeddings
+
+            # Sort by index to maintain order
             sorted_embeddings = sorted(response.data, key=lambda x: x.index)
-            all_embeddings.extend([self._pad_embedding(e.embedding) for e in sorted_embeddings])
-        
+            all_embeddings.extend([e.embedding for e in sorted_embeddings])
+
         logger.info(f"Created {len(all_embeddings)} embeddings")
         return all_embeddings
-    
+
     @retry_with_backoff(max_retries=3)
     async def create_embedding(self, text: str) -> List[float]:
         """Create a single embedding"""
@@ -96,7 +88,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             model=self.model,
             input=[text]
         )
-        return self._pad_embedding(response.data[0].embedding)
+        return response.data[0].embedding
 
 def get_embedding_provider() -> EmbeddingProvider:
     """Factory function to get the configured embedding provider"""
