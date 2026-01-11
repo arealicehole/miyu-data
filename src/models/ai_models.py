@@ -11,6 +11,7 @@ class AIRequest(BaseModel):
     max_tokens: int = 4096
     stream: bool = False
     temperature: Optional[float] = None
+    thinking: bool = False  # Use deepseek-reasoner for complex reasoning
 
 class AIResponse(BaseModel):
     content: str

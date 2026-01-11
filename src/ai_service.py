@@ -32,11 +32,11 @@ class AIService:
         "Include specific details, examples, and context from the transcript when applicable. "
         "Your goal is to give a complete and nuanced answer that leaves no stone unturned."
     )
-    
+
     REPORT_PROMPT = (
         "You are a helpful assistant tasked with analyzing meeting transcripts and creating comprehensive reports."
     )
-    
+
     GENERAL_PROMPT = (
         "You are a highly detailed and thorough assistant analyzing meeting transcripts. "
         "Provide comprehensive, in-depth responses that cover all relevant aspects of the given task. "
@@ -44,7 +44,7 @@ class AIService:
         "Your goal is to give a complete and nuanced answer that leaves no stone unturned. "
         "When asked to return a list, format it as a comma-separated list."
     )
-    
+
     def __init__(self, provider: Optional[AIProvider] = None):
         self.provider = provider or get_ai_provider()
         self.max_tokens = 4096
@@ -57,15 +57,17 @@ class AIService:
         # YOLO mode - no limits!
         self.yolo_mode = os.getenv('YOLO_MODE', 'false').lower() == 'true'
         if self.yolo_mode:
-            logger.info("🚀 YOLO_MODE enabled - AI processing limits removed!")
-    
-    def _truncate_transcript(self, transcript: str) -> str:
+            logger.info("YOLO_MODE enabled - AI processing limits removed!")
+
+    def _truncate_transcript(self, transcript: str, thinking: bool = False) -> str:
         """Truncate transcript to fit within token limits"""
         if self.yolo_mode:
             return transcript  # No truncation in YOLO mode
-        max_length = self.max_tokens * 4  # Approximate character count
+        # Use larger limit for thinking mode
+        max_tokens = 32768 if thinking else self.max_tokens
+        max_length = max_tokens * 4  # Approximate character count
         return transcript[:max_length] if len(transcript) > max_length else transcript
-    
+
     def _format_closer_look_query(self, transcript: str, topic: str) -> str:
         """Format the query for closer look analysis"""
         return (
@@ -74,7 +76,7 @@ class AIService:
             f"context, and specific information from the transcript in your response.\n\n"
             f"Transcript:\n{transcript}"
         )
-    
+
     def _format_report_query(self, transcript: str) -> str:
         """Format the query for comprehensive report generation"""
         return f"""Please analyze the following transcript and organize the information into these specific categories:
@@ -90,7 +92,7 @@ For each category, provide detailed information and context from the transcript.
 
 Transcript:
 {transcript}"""
-    
+
     def _format_general_query(self, transcript: str, query: str) -> str:
         """Format a general query for AI response"""
         return (
@@ -99,8 +101,8 @@ Transcript:
             f"information from the transcript in your response.\n\n"
             f"Transcript:\n{transcript}\n\nTask: {query}"
         )
-    
-    def _build_request(self, system_prompt: str, user_content: str) -> AIRequest:
+
+    def _build_request(self, system_prompt: str, user_content: str, thinking: bool = False) -> AIRequest:
         """Build an AI request with the given prompts"""
         return AIRequest(
             model=self.model or "",  # Will use provider's default if empty
@@ -109,9 +111,10 @@ Transcript:
                 {"role": "user", "content": user_content}
             ],
             max_tokens=self.max_tokens,
-            stream=False
+            stream=False,
+            thinking=thinking
         )
-    
+
     async def _execute_request(self, request: AIRequest) -> str:
         """Execute an AI request and return the content"""
         try:
@@ -120,27 +123,30 @@ Transcript:
         except Exception as e:
             logger.error(f"AI request failed: {str(e)}")
             return f"Error processing AI request: {str(e)}"
-    
+
     @retry(max_retries=3)
-    async def get_closer_look(self, transcript: str, topic: str) -> str:
-        """Get a detailed analysis of a specific topic from the transcript"""
-        transcript = self._truncate_transcript(transcript)
+    async def get_closer_look(self, transcript: str, topic: str, thinking: bool = True) -> str:
+        """Get a detailed analysis of a specific topic from the transcript.
+        Defaults to thinking mode for deeper reasoning."""
+        transcript = self._truncate_transcript(transcript, thinking)
         user_content = self._format_closer_look_query(transcript, topic)
-        request = self._build_request(self.CLOSER_LOOK_PROMPT, user_content)
+        request = self._build_request(self.CLOSER_LOOK_PROMPT, user_content, thinking)
         return await self._execute_request(request)
-    
+
     @retry(max_retries=3)
-    async def generate_comprehensive_report(self, transcript: str) -> str:
-        """Generate a comprehensive report from the transcript"""
-        transcript = self._truncate_transcript(transcript)
+    async def generate_comprehensive_report(self, transcript: str, thinking: bool = False) -> str:
+        """Generate a comprehensive report from the transcript.
+        Defaults to non-thinking mode for faster structured extraction."""
+        transcript = self._truncate_transcript(transcript, thinking)
         user_content = self._format_report_query(transcript)
-        request = self._build_request(self.REPORT_PROMPT, user_content)
+        request = self._build_request(self.REPORT_PROMPT, user_content, thinking)
         return await self._execute_request(request)
-    
+
     @retry(max_retries=3)
-    async def get_response(self, transcript: str, query: str) -> str:
-        """Get a general AI response for a query about the transcript"""
-        transcript = self._truncate_transcript(transcript)
+    async def get_response(self, transcript: str, query: str, thinking: bool = False) -> str:
+        """Get a general AI response for a query about the transcript.
+        Defaults to non-thinking mode for faster responses."""
+        transcript = self._truncate_transcript(transcript, thinking)
         user_content = self._format_general_query(transcript, query)
-        request = self._build_request(self.GENERAL_PROMPT, user_content)
+        request = self._build_request(self.GENERAL_PROMPT, user_content, thinking)
         return await self._execute_request(request)

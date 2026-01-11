@@ -7,43 +7,63 @@ from src.models.ai_models import AIRequest, AIResponse
 logger = logging.getLogger(__name__)
 
 class DeepSeekProvider(AIProvider):
+    # Model constants for DeepSeek V3.2
+    MODEL_CHAT = "deepseek-chat"          # Non-thinking mode
+    MODEL_REASONER = "deepseek-reasoner"  # Thinking mode
+
+    # Token limits per mode
+    MAX_TOKENS_CHAT = 8192      # 8K max for non-thinking
+    MAX_TOKENS_REASONER = 32768 # 32K default for thinking (max 64K)
+
     def __init__(self):
         api_key = os.getenv('DEEPSEEK_API_KEY')
         if not api_key:
             raise ValueError("DEEPSEEK_API_KEY not found in environment variables.")
-            
+
         self.api_key = api_key
-        self.base_url = "https://api.deepseek.com/v1/chat/completions"
-        self.default_model = "deepseek-chat"
-        self.timeout = aiohttp.ClientTimeout(total=30)
-        
+        self.base_url = "https://api.deepseek.com/chat/completions"
+        self.default_model = self.MODEL_CHAT
+
+    def _get_config(self, thinking: bool):
+        """Get model, max_tokens, and timeout based on thinking mode."""
+        if thinking:
+            return self.MODEL_REASONER, self.MAX_TOKENS_REASONER, aiohttp.ClientTimeout(total=120)
+        return self.MODEL_CHAT, self.MAX_TOKENS_CHAT, aiohttp.ClientTimeout(total=30)
+
     async def chat_completion(self, request: AIRequest) -> AIResponse:
         """
         Execute a chat completion request using DeepSeek API
-        
+
         Args:
             request: The AI request containing model, messages, and parameters
-            
+
         Returns:
             AIResponse containing the generated content
         """
+        # Get config based on thinking mode
+        model, max_tokens, timeout = self._get_config(request.thinking)
+
+        # Allow model override from request, otherwise use thinking-based default
+        if request.model:
+            model = request.model
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
-        
+
         payload = {
-            "model": request.model or self.default_model,
+            "model": model,
             "messages": request.messages,
-            "max_tokens": request.max_tokens,
+            "max_tokens": max_tokens if request.thinking else request.max_tokens,
             "stream": request.stream
         }
-        
+
         if request.temperature is not None:
             payload["temperature"] = request.temperature
-        
+
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.base_url,
                     headers=headers,
@@ -51,10 +71,10 @@ class DeepSeekProvider(AIProvider):
                 ) as response:
                     response.raise_for_status()
                     data = await response.json()
-                    
+
                     return AIResponse(
                         content=data['choices'][0]['message']['content'],
-                        model=data.get('model', self.default_model),
+                        model=data.get('model', model),
                         usage=data.get('usage')
                     )
         except Exception as e:

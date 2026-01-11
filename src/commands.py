@@ -81,72 +81,80 @@ async def process_channel_messages(interaction: discord.Interaction, max_message
     return "\n".join(reversed(messages)), message_count
 
 @bot.tree.command(name="execute_notes", description="Execute all AI tasks noted from the transcript")
+@app_commands.describe(
+    thinking="Use thinking mode for deeper reasoning (default: True)"
+)
 @handle_interaction_errors
-async def execute_notes(interaction: discord.Interaction):
+async def execute_notes(interaction: discord.Interaction, thinking: bool = True):
     _ensure_services()
     channel_id = interaction.channel.id
-    
+
     if not await check_transcript_exists(interaction):
         return
-    
+
     transcript = await db_service.get_channel_transcript(channel_id)
     notes = await db_service.get_section_items(channel_id, 'notes_for_ai')
-    
+
     if not notes:
         await interaction.followup.send("No AI tasks were noted in the transcript!")
         return
-    
-    # Execute each note
-    await interaction.followup.send(f"Found {len(notes)} AI tasks to execute. Processing each one...")
-    
+
+    mode_label = "thinking" if thinking else "fast"
+    await interaction.followup.send(f"Found {len(notes)} AI tasks to execute ({mode_label} mode). Processing each one...")
+
     for i, note in enumerate(notes, 1):
         await interaction.followup.send(f"**Task {i}/{len(notes)}:** {note}")
-        response = await ai_service.get_response(transcript, note)
+        response = await ai_service.get_response(transcript, note, thinking=thinking)
         await split_and_send_message(interaction.channel, response)
         await asyncio.sleep(1)  # Prevent rate limiting
-    
-    await interaction.followup.send("✅ All AI tasks have been executed!")
+
+    await interaction.followup.send("All AI tasks have been executed!")
 
 @bot.tree.command(name="closerlook", description="Get a closer look at a specific topic using semantic search + AI analysis")
-@app_commands.describe(topic="The topic you want to explore in more depth")
+@app_commands.describe(
+    topic="The topic you want to explore in more depth",
+    thinking="Use thinking mode for deeper reasoning (default: True)"
+)
 @handle_interaction_errors
-async def closerlook(interaction: discord.Interaction, topic: str):
+async def closerlook(interaction: discord.Interaction, topic: str, thinking: bool = True):
     """Enhanced closerlook using semantic search + AI analysis"""
     _ensure_services()
     _ensure_query_processor()
-    
+
     if not await check_transcript_exists(interaction):
         return
-    
+
+    mode_label = "thinking" if thinking else "fast"
+    await interaction.followup.send(f"Analyzing '{topic}' in {mode_label} mode...", ephemeral=True)
+
     # First, get relevant content using semantic search
     search_results = await query_processor.search_optimized(
         query=topic,
         channel_id=interaction.channel.id,
         max_results=8  # Get more context for AI analysis
     )
-    
+
     if not search_results:
         # Fallback to old method if no semantic results
         transcript = await db_service.get_channel_transcript(interaction.channel.id)
-        response = await ai_service.get_closer_look(transcript, topic)
+        response = await ai_service.get_closer_look(transcript, topic, thinking=thinking)
         await split_and_send_message(interaction.channel, response)
         return
-    
+
     # Combine relevant chunks for AI analysis
     relevant_content = []
     for result in search_results:
         relevant_content.append(f"[Relevance: {result['score']:.2f}] {result['text']}")
-    
+
     combined_context = "\n\n---\n\n".join(relevant_content)
-    
+
     # Get AI analysis on the relevant content
-    enhanced_prompt = f"Based on the most relevant transcript segments below, provide a detailed analysis of '{topic}':\n\n{combined_context}"
-    response = await ai_service.get_closer_look(combined_context, topic)
-    
+    response = await ai_service.get_closer_look(combined_context, topic, thinking=thinking)
+
     # Add search context to the response
-    context_info = f"*🔍 Analysis based on {len(search_results)} most relevant transcript segments*\n\n"
+    context_info = f"*Analysis based on {len(search_results)} most relevant transcript segments ({mode_label} mode)*\n\n"
     full_response = context_info + response
-    
+
     await split_and_send_message(interaction.channel, full_response)
 
 @bot.tree.command(name="search", description="Search transcript content with AI-powered semantic search")
@@ -268,10 +276,10 @@ async def explore(interaction: discord.Interaction, topic: Optional[str] = None,
         response_parts.append("")
     
     if depth >= 3 and len(results) > 3:
-        # Generate AI insights for deep exploration
+        # Generate AI insights for deep exploration (use thinking mode for deep analysis)
         context = "\n\n".join([r['text'] for r in results[:5]])
-        insights = await ai_service.get_closer_look(context, f"key insights and patterns related to {topic}")
-        response_parts.append(f"**🧠 AI Insights:**\n{insights}")
+        insights = await ai_service.get_closer_look(context, f"key insights and patterns related to {topic}", thinking=True)
+        response_parts.append(f"**AI Insights (thinking mode):**\n{insights}")
     
     full_response = "\n".join(response_parts)
     await split_and_send_message(interaction.channel, full_response)
@@ -354,18 +362,19 @@ GitHub: https://github.com/arealicehole/miyu-data
 @bot.tree.command(name="ingest", description="Ingest meeting transcript from channel history")
 @app_commands.describe(
     max_messages="Maximum number of messages to ingest (0 for all)",
-    transcript_name="Name to identify this transcript"
+    transcript_name="Name to identify this transcript",
+    thinking="Use thinking mode for report generation (default: False)"
 )
 @handle_interaction_errors
-async def ingest(interaction: discord.Interaction, transcript_name: str, max_messages: int = 0):
+async def ingest(interaction: discord.Interaction, transcript_name: str, max_messages: int = 0, thinking: bool = False):
     _ensure_services()
     try:
         transcript, message_count = await process_channel_messages(interaction, max_messages)
-        
+
         await db_service.save_transcript(interaction.channel.id, transcript, "channel", transcript_name)
-        await interaction.followup.send(f"✅ Meeting transcript ingested successfully! Total messages: {message_count}")
-        
-        report = await ai_service.generate_comprehensive_report(transcript)
+        await interaction.followup.send(f"Meeting transcript ingested successfully! Total messages: {message_count}")
+
+        report = await ai_service.generate_comprehensive_report(transcript, thinking=thinking)
         await split_and_send_message(interaction.channel, report)
     except discord.errors.HTTPException:
         await interaction.followup.send(f"Error: Hit Discord API limit. Ingested {message_count} messages before stopping.")
@@ -373,34 +382,41 @@ async def ingest(interaction: discord.Interaction, transcript_name: str, max_mes
 @bot.tree.command(name="ingest_file", description="Ingest meeting transcript from an attached .txt file")
 @app_commands.describe(
     file="The .txt file containing the meeting transcript",
-    transcript_name="Name to identify this transcript"
+    transcript_name="Name to identify this transcript",
+    thinking="Use thinking mode for report generation (default: False)"
 )
 @handle_interaction_errors
-async def ingest_file(interaction: discord.Interaction, file: discord.Attachment, transcript_name: str):
+async def ingest_file(interaction: discord.Interaction, file: discord.Attachment, transcript_name: str, thinking: bool = False):
     _ensure_services()
     if not file.filename.endswith('.txt'):
         await interaction.followup.send("Please upload a .txt file.")
         return
-    
+
     content = await file.read()
     transcript = content.decode('utf-8')
-    
+
     await db_service.save_transcript(interaction.channel.id, transcript, "file", transcript_name)
-    await interaction.followup.send(f"✅ Meeting transcript from {file.filename} ingested successfully!")
-    
-    report = await ai_service.generate_comprehensive_report(transcript)
+    await interaction.followup.send(f"Meeting transcript from {file.filename} ingested successfully!")
+
+    report = await ai_service.generate_comprehensive_report(transcript, thinking=thinking)
     await split_and_send_message(interaction.channel, report)
 
 @bot.tree.command(name="autoreport", description="Generate a detailed report for each item from the transcript analysis")
+@app_commands.describe(
+    thinking="Use thinking mode for deeper reasoning (default: True)"
+)
 @handle_interaction_errors
-async def autoreport(interaction: discord.Interaction):
+async def autoreport(interaction: discord.Interaction, thinking: bool = True):
     _ensure_services()
     if not await check_transcript_exists(interaction):
         return
-    
+
+    mode_label = "thinking" if thinking else "fast"
+    await interaction.followup.send(f"Generating detailed report in {mode_label} mode...")
+
     transcript = await db_service.get_channel_transcript(interaction.channel.id)
     sections = await db_service.get_all_sections(interaction.channel.id)
-    
+
     # Section titles for display
     section_titles = {
         'conversation_topics': 'Main Conversation Topics',
@@ -410,16 +426,16 @@ async def autoreport(interaction: discord.Interaction):
         'decisions_made': 'Decisions Made',
         'critical_updates': 'Critical Updates'
     }
-    
+
     # Process each section
     for section_key, items in sections.items():
         if items:  # Only process sections that have items
             await interaction.followup.send(f"**{section_titles[section_key]}**")
-            
+
             # Generate a closer look for each item in the section
             for item in items:
-                response = await ai_service.get_closer_look(transcript, item)
+                response = await ai_service.get_closer_look(transcript, item, thinking=thinking)
                 await interaction.followup.send(f"**• {item}**\n\n{response}")
                 await asyncio.sleep(1)  # Prevent rate limiting
-    
-    await interaction.followup.send("✅ Detailed report generation completed!")
+
+    await interaction.followup.send("Detailed report generation completed!")
