@@ -62,6 +62,8 @@ class DeepSeekProvider(AIProvider):
         if request.temperature is not None:
             payload["temperature"] = request.temperature
 
+        logger.info(f"DeepSeek request: model={model}, thinking={request.thinking}, max_tokens={payload['max_tokens']}")
+
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
@@ -69,14 +71,22 @@ class DeepSeekProvider(AIProvider):
                     headers=headers,
                     json=payload
                 ) as response:
-                    response.raise_for_status()
-                    data = await response.json()
+                    response_text = await response.text()
+
+                    if response.status != 200:
+                        logger.error(f"DeepSeek API error {response.status}: {response_text}")
+                        raise RuntimeError(f"DeepSeek API error {response.status}: {response_text[:500]}")
+
+                    data = await response.json(content_type=None)
 
                     return AIResponse(
                         content=data['choices'][0]['message']['content'],
                         model=data.get('model', model),
                         usage=data.get('usage')
                     )
+        except aiohttp.ClientError as e:
+            logger.error(f"DeepSeek connection error: {type(e).__name__}: {str(e)}")
+            raise RuntimeError(f"DeepSeek connection error: {str(e)}")
         except Exception as e:
-            logger.error(f"DeepSeek API error: {str(e)}")
-            raise RuntimeError(f"DeepSeek API error: {str(e)}")
+            logger.error(f"DeepSeek error: {type(e).__name__}: {str(e)}")
+            raise RuntimeError(f"DeepSeek error: {str(e)}")
