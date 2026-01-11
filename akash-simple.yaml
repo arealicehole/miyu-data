@@ -3,12 +3,11 @@ version: "2.0"
 
 services:
   web:
-    image: arealicehole/miyu-data:MDB2A
+    image: ghcr.io/arealicehole/miyu-data:2.1.0
     env:
       - DISCORD_TOKEN=
-      - AI_PROVIDER=openrouter
-      - OPENROUTER_API_KEY=
-      - OPENROUTER_MODEL=openai/gpt-4o-mini
+      - AI_PROVIDER=deepseek
+      - DEEPSEEK_API_KEY=
       - OPENAI_API_KEY=
       - PINECONE_API_KEY=
       - PINECONE_INDEX=miyu-testa
@@ -29,7 +28,7 @@ profiles:
           size: 512Mi
         storage:
           size: 1Gi
-  
+
   placement:
     dcloud:
       pricing:
