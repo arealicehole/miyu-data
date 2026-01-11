@@ -3,7 +3,7 @@ version: "2.0"
 
 services:
   web:
-    image: ghcr.io/arealicehole/miyu-data:2.1.1
+    image: ghcr.io/arealicehole/miyu-data:2.1.2
     env:
       - DISCORD_TOKEN=
       - AI_PROVIDER=deepseek

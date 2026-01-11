@@ -27,8 +27,8 @@ class DeepSeekProvider(AIProvider):
     def _get_config(self, thinking: bool):
         """Get model, max_tokens, and timeout based on thinking mode."""
         if thinking:
-            return self.MODEL_REASONER, self.MAX_TOKENS_REASONER, aiohttp.ClientTimeout(total=120)
-        return self.MODEL_CHAT, self.MAX_TOKENS_CHAT, aiohttp.ClientTimeout(total=30)
+            return self.MODEL_REASONER, self.MAX_TOKENS_REASONER, aiohttp.ClientTimeout(total=180)
+        return self.MODEL_CHAT, self.MAX_TOKENS_CHAT, aiohttp.ClientTimeout(total=90)
 
     async def chat_completion(self, request: AIRequest) -> AIResponse:
         """
